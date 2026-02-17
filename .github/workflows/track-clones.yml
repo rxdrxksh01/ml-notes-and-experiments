@@ -21,8 +21,11 @@ jobs:
           mkdir -p analytics
           
           # Call GitHub Traffic API
-          RESPONSE=$(curl -s -w "\n%{http_code}" -H "Authorization: token ${{ secrets.GH_TOKEN }}" \
-            https://api.github.com/repos/${{ github.repository }}/traffic/clones)
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/traffic/clones")
           
           HTTP_STATUS=$(echo "$RESPONSE" | tail -n 1)
           CLONES_DATA=$(echo "$RESPONSE" | sed '$d')
