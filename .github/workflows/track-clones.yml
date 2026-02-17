@@ -1,0 +1,45 @@
+name: Track Repository Clones
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Runs daily at midnight UTC
+  workflow_dispatch: # Allows manual triggering
+
+jobs:
+  track-clones:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fetch clone statistics
+        run: |
+          # Ensure analytics directory exists
+          mkdir -p analytics
+          
+          DATE=$(date +%Y-%m-%d)
+          
+          # Call GitHub Traffic API
+          CLONES_DATA=$(curl -s -H "Authorization: token ${{ secrets.GH_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository }}/traffic/clones)
+          
+          # Extract count and uniques using jq
+          TOTAL_CLONES=$(echo "$CLONES_DATA" | jq -r '.count // 0')
+          UNIQUE_CLONERS=$(echo "$CLONES_DATA" | jq -r '.uniques // 0')
+          
+          # Append to csv
+          echo "$DATE,$TOTAL_CLONES,$UNIQUE_CLONERS" >> analytics/clones.csv
+
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add analytics/clones.csv
+          
+          # Only commit and push if there are changes
+          if ! git diff --cached --quiet; then
+            git commit -m "docs: update clone statistics for $(date +%Y-%m-%d)"
+            git push
+          else
+            echo "No changes to commit"
+          fi
