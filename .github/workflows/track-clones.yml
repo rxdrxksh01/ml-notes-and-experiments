@@ -19,18 +19,20 @@ jobs:
           # Ensure analytics directory exists
           mkdir -p analytics
           
-          DATE=$(date +%Y-%m-%d)
-          
           # Call GitHub Traffic API
           CLONES_DATA=$(curl -s -H "Authorization: token ${{ secrets.GH_TOKEN }}" \
             https://api.github.com/repos/${{ github.repository }}/traffic/clones)
           
-          # Extract count and uniques using jq
-          TOTAL_CLONES=$(echo "$CLONES_DATA" | jq -r '.count // 0')
-          UNIQUE_CLONERS=$(echo "$CLONES_DATA" | jq -r '.uniques // 0')
+          # Extract daily data using jq and append to csv
+          # Format: timestamp, count, uniques
+          echo "$CLONES_DATA" | jq -r '.clones[] | "\(.timestamp | split("T")[0]),\(.count),\(.uniques)"' >> analytics/clones.csv
           
-          # Append to csv
-          echo "$DATE,$TOTAL_CLONES,$UNIQUE_CLONERS" >> analytics/clones.csv
+          # Remove duplicates and sort (keeping the header)
+          HEADER=$(head -n 1 analytics/clones.csv)
+          tail -n +2 analytics/clones.csv | sort -u -t, -k1,1 > analytics/clones_temp.csv
+          echo "$HEADER" > analytics/clones.csv
+          cat analytics/clones_temp.csv >> analytics/clones.csv
+          rm analytics/clones_temp.csv
 
       - name: Commit and push changes
         run: |
@@ -40,7 +42,7 @@ jobs:
           
           # Only commit and push if there are changes
           if ! git diff --cached --quiet; then
-            git commit -m "docs: update clone statistics for $(date +%Y-%m-%d)"
+            git commit -m "docs: update historical clone statistics"
             git push
           else
             echo "No changes to commit"
