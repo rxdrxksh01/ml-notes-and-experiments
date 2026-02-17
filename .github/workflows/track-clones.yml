@@ -4,6 +4,7 @@ on:
   schedule:
     - cron: '0 0 * * *' # Runs daily at midnight UTC
   workflow_dispatch: # Allows manual triggering
+
 permissions:
   contents: write
 
@@ -20,19 +21,37 @@ jobs:
           mkdir -p analytics
           
           # Call GitHub Traffic API
-          CLONES_DATA=$(curl -s -H "Authorization: token ${{ secrets.GH_TOKEN }}" \
+          RESPONSE=$(curl -s -w "\n%{http_code}" -H "Authorization: token ${{ secrets.GH_TOKEN }}" \
             https://api.github.com/repos/${{ github.repository }}/traffic/clones)
           
+          HTTP_STATUS=$(echo "$RESPONSE" | tail -n 1)
+          CLONES_DATA=$(echo "$RESPONSE" | sed '$d')
+          
+          echo "HTTP Status: $HTTP_STATUS"
+          
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "Error: API returned status $HTTP_STATUS"
+            echo "Response: $CLONES_DATA"
+            exit 1
+          fi
+
+          if ! echo "$CLONES_DATA" | jq -e '.clones' > /dev/null; then
+             echo "Error: 'clones' field not found in response"
+             echo "Response: $CLONES_DATA"
+             exit 1
+          fi
+          
           # Extract daily data using jq and append to csv
-          # Format: timestamp, count, uniques
           echo "$CLONES_DATA" | jq -r '.clones[] | "\(.timestamp | split("T")[0]),\(.count),\(.uniques)"' >> analytics/clones.csv
           
           # Remove duplicates and sort (keeping the header)
-          HEADER=$(head -n 1 analytics/clones.csv)
-          tail -n +2 analytics/clones.csv | sort -u -t, -k1,1 > analytics/clones_temp.csv
-          echo "$HEADER" > analytics/clones.csv
-          cat analytics/clones_temp.csv >> analytics/clones.csv
-          rm analytics/clones_temp.csv
+          HEADER="date,total_clones,unique_cloners"
+          if [ -f analytics/clones.csv ]; then
+            tail -n +2 analytics/clones.csv | sort -u -t, -k1,1 > analytics/clones_temp.csv
+            echo "$HEADER" > analytics/clones.csv
+            cat analytics/clones_temp.csv >> analytics/clones.csv
+            rm analytics/clones_temp.csv
+          fi
 
       - name: Commit and push changes
         run: |
