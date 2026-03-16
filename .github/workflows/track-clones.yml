@@ -2,8 +2,8 @@ name: Track Repository Clones
 
 on:
   schedule:
-    - cron: '0 0 * * *' # Runs daily at midnight UTC
-  workflow_dispatch: # Allows manual triggering
+    - cron: '0 0 * * *'   # Runs daily at midnight UTC
+  workflow_dispatch:      # Allows manual run
 
 permissions:
   contents: write
@@ -11,58 +11,64 @@ permissions:
 jobs:
   track-clones:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Fetch clone statistics
         run: |
-          # Ensure analytics directory exists
           mkdir -p analytics
-          
-          # Call GitHub Traffic API
+
+          FILE="analytics/clones.csv"
+
+          # Create file with header if it doesn't exist
+          if [ ! -f "$FILE" ]; then
+            echo "date,total_clones,unique_cloners" > "$FILE"
+          fi
+
+          echo "Fetching GitHub traffic data..."
+
           RESPONSE=$(curl -s -w "\n%{http_code}" \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/${{ github.repository }}/traffic/clones")
-          
+
           HTTP_STATUS=$(echo "$RESPONSE" | tail -n 1)
           CLONES_DATA=$(echo "$RESPONSE" | sed '$d')
-          
+
           echo "HTTP Status: $HTTP_STATUS"
-          
+
           if [ "$HTTP_STATUS" -ne 200 ]; then
-            echo "Error: API returned status $HTTP_STATUS"
-            echo "Response: $CLONES_DATA"
+            echo "API error: $HTTP_STATUS"
+            echo "$CLONES_DATA"
             exit 1
           fi
 
-          if ! echo "$CLONES_DATA" | jq -e '.clones' > /dev/null; then
-             echo "Error: 'clones' field not found in response"
-             echo "Response: $CLONES_DATA"
-             exit 1
-          fi
-          
-          # Extract daily data using jq and append to csv
-          echo "$CLONES_DATA" | jq -r '.clones[] | "\(.timestamp | split("T")[0]),\(.count),\(.uniques)"' >> analytics/clones.csv
-          
-          # Remove duplicates and sort (keeping the header)
+          # Extract data from JSON
+          echo "$CLONES_DATA" | jq -r \
+          '.clones[] | "\(.timestamp | split("T")[0]),\(.count),\(.uniques)"' >> "$FILE"
+
+          # Remove duplicates and sort by date
           HEADER="date,total_clones,unique_cloners"
-          if [ -f analytics/clones.csv ]; then
-            tail -n +2 analytics/clones.csv | sort -u -t, -k1,1 > analytics/clones_temp.csv
-            echo "$HEADER" > analytics/clones.csv
-            cat analytics/clones_temp.csv >> analytics/clones.csv
-            rm analytics/clones_temp.csv
-          fi
+
+          tail -n +2 "$FILE" | sort -u -t, -k1,1 > analytics/temp.csv
+
+          echo "$HEADER" > "$FILE"
+          cat analytics/temp.csv >> "$FILE"
+
+          rm analytics/temp.csv
+
+          echo "Clone data updated."
 
       - name: Commit and push changes
         run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
           git add analytics/clones.csv
-          
-          # Only commit and push if there are changes
+
           if ! git diff --cached --quiet; then
             git commit -m "docs: update historical clone statistics"
             git push
